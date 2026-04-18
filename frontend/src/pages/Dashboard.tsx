@@ -43,7 +43,7 @@ function StatCard({
 }) {
   const inner = (
     <div
-      className={`bg-white rounded-xl border border-gray-200 p-5 shadow-sm flex items-start gap-4 ${to ? 'hover:shadow-md transition-shadow cursor-pointer' : ''}`}
+      className={`bg-white rounded-xl border border-gray-200 p-5 shadow-sm flex items-start gap-4 h-full ${to ? 'hover:shadow-md transition-shadow cursor-pointer' : ''}`}
     >
       <div className={`p-2.5 rounded-lg ${accent} shrink-0`}>{icon}</div>
       <div className="flex-1 min-w-0">
@@ -61,7 +61,7 @@ function StatCard({
     </div>
   );
 
-  return to ? <Link to={to}>{inner}</Link> : inner;
+  return to ? <Link to={to} className="block h-full">{inner}</Link> : inner;
 }
 
 function SeverityRow({ label, count, color }: { label: string; count: number; color: string }) {
