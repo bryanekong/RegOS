@@ -9,7 +9,7 @@ import hashlib
 
 router = APIRouter()
 
-@router.get("/status")
+@router.get("/pipeline/status")
 async def get_pipeline_status(db: AsyncSession = Depends(get_db)):
     # Group by stage, status
     query = select(
