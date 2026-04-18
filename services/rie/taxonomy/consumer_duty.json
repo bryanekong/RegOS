@@ -1,0 +1,25 @@
+{
+  "framework": "ConsumerDuty",
+  "version": "1.0.0",
+  "keywords": [
+    "consumer duty", "consumer outcomes", "fair value", "vulnerable customers",
+    "cross-cutting rules", "price and value", "products and services",
+    "consumer understanding", "consumer support", "PRIN 2A", "COCON",
+    "retail customers", "good outcomes", "consumer principle"
+  ],
+  "high_severity_phrases": [
+    "final rule", "comes into force", "must comply by", "enforcement action",
+    "policy statement", "binding requirement", "failure to comply"
+  ],
+  "provisions": [
+    "PRIN 2A.1", "PRIN 2A.2", "PRIN 2A.3", "PRIN 2A.4",
+    "COCON 4.1", "COCON 4.1.5R", "Consumer Duty Rule",
+    "Consumer Principle", "cross-cutting rules"
+  ],
+  "doc_type_severity": {
+    "FinalRule": "HIGH",
+    "DearCEOLetter": "HIGH",
+    "ConsultationPaper": "MEDIUM",
+    "GuidanceNote": "LOW"
+  }
+}
