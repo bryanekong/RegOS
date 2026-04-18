@@ -2,9 +2,11 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import Navbar from './components/Navbar';
 import { ToastProvider } from './components/Toast';
+import Dashboard from './pages/Dashboard';
 import ImpactFeed from './pages/ImpactFeed';
 import PolicyMap from './pages/PolicyMap';
 import RemediationTracker from './pages/RemediationTracker';
+import PublicationDetail from './pages/PublicationDetail';
 
 const queryClient = new QueryClient();
 
@@ -17,7 +19,9 @@ function App() {
             <Navbar />
             <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8">
               <Routes>
-                <Route path="/" element={<ImpactFeed />} />
+                <Route path="/" element={<Dashboard />} />
+                <Route path="/feed" element={<ImpactFeed />} />
+                <Route path="/publications/:id" element={<PublicationDetail />} />
                 <Route path="/policies" element={<PolicyMap />} />
                 <Route path="/tasks" element={<RemediationTracker />} />
               </Routes>
