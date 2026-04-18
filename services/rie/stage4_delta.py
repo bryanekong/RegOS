@@ -40,11 +40,11 @@ class Stage4Worker(BaseWorker):
           if len(section_text.split()) > 5 and len(pub_text.split()) > 5:
             tfidf = self.vectorizer.fit_transform([section_text, pub_text])
             sim = (tfidf[0] * tfidf[1].T).toarray()[0][0]
-            confidence = 'MEDIUM' if sim > 0.15 else None
+            confidence = 'MEDIUM' if sim > 0.10 else 'LOW'
           else:
-            confidence = None
+            confidence = 'LOW'
         except Exception:
-          confidence = None
+          confidence = 'LOW'
 
       if not confidence:
         continue
