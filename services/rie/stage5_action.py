@@ -14,6 +14,7 @@ class Stage5Worker(BaseWorker):
          (publication_id, policy_id, policy_section_id, section_title,
           change_type, action_text, severity, deadline, status, owner)
          VALUES (%s::uuid, %s::uuid, %s, %s, %s, %s, %s, %s, 'open', 'Compliance Team')
+         ON CONFLICT ON CONSTRAINT uq_remediation_task_pub_policy_section DO NOTHING
          RETURNING task_id""",
       (
         payload['publication_id'], payload['policy_id'],
@@ -22,13 +23,18 @@ class Stage5Worker(BaseWorker):
         payload.get('severity'), deadline.isoformat()
       )
     )
-    task_id = self.cur.fetchone()[0]
+    row = self.cur.fetchone()
     self.update_publication(
       payload['publication_id'],
       status='actioned',
       processed_at=datetime.now(timezone.utc).isoformat()
     )
-    # Supabase Realtime fires automatically on INSERT — no extra call needed
-    self.logger.info(f"Stage5 task created: task_id={task_id}, policy={payload['policy_id']}")
+    if row:
+      self.logger.info(f"Stage5 task created: task_id={row[0]}, policy={payload['policy_id']}")
+    else:
+      self.logger.info(
+        f"Stage5 skipped duplicate task: pub={payload['publication_id']}, "
+        f"policy={payload['policy_id']}, section={payload.get('policy_section_id')}"
+      )
 
 if __name__ == '__main__': Stage5Worker().run()

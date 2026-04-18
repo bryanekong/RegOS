@@ -74,13 +74,22 @@ class BaseWorker:
     )
     self.logger.info(f"Published to {self.stage_next}: {list(payload.keys())}")
 
+  _ALLOWED_PUBLICATION_FIELDS = frozenset({
+    'full_text', 'sections', 'summary', 'classification',
+    'status', 'processed_at', 'doc_type', 'pub_date'
+  })
+
   def update_publication(self, publication_id: str, **kwargs):
     import json
     set_clauses = []
     values = []
     for k, v in kwargs.items():
+      if k not in self._ALLOWED_PUBLICATION_FIELDS:
+        raise ValueError(f"Disallowed publication field: {k}")
       set_clauses.append(f"{k} = %s")
       values.append(json.dumps(v) if isinstance(v, (dict, list)) else v)
+    if not set_clauses:
+      return
     values.append(publication_id)
     self.cur.execute(
       f"UPDATE publications SET {', '.join(set_clauses)} WHERE publication_id = %s::uuid",

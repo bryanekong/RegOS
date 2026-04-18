@@ -31,6 +31,40 @@ async def lifespan(app: FastAPI):
             CREATE TRIGGER pipeline_queue_notify AFTER INSERT ON pipeline_queue
             FOR EACH ROW EXECUTE FUNCTION notify_pipeline_stage();
         """))
+
+        # Idempotent schema patches for existing deployments (create_all only
+        # creates new tables; it won't add constraints/columns to existing ones).
+        await conn.execute(text("""
+            ALTER TABLE pipeline_queue
+                ADD COLUMN IF NOT EXISTS attempts BIGINT DEFAULT 0,
+                ADD COLUMN IF NOT EXISTS last_error TEXT;
+        """))
+        await conn.execute(text("""
+            DO $$ BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_constraint
+                    WHERE conname = 'uq_remediation_task_pub_policy_section'
+                ) THEN
+                    ALTER TABLE remediation_tasks
+                    ADD CONSTRAINT uq_remediation_task_pub_policy_section
+                    UNIQUE (publication_id, policy_id, policy_section_id);
+                END IF;
+            END $$;
+        """))
+        await conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_remediation_task_publication_id
+                ON remediation_tasks (publication_id);
+            CREATE INDEX IF NOT EXISTS ix_remediation_task_policy_id
+                ON remediation_tasks (policy_id);
+            CREATE INDEX IF NOT EXISTS ix_remediation_task_status
+                ON remediation_tasks (status);
+            CREATE INDEX IF NOT EXISTS ix_remediation_task_deadline
+                ON remediation_tasks (deadline);
+            CREATE INDEX IF NOT EXISTS ix_pipeline_queue_status
+                ON pipeline_queue (status);
+            CREATE INDEX IF NOT EXISTS ix_pipeline_queue_stage_status
+                ON pipeline_queue (stage, status);
+        """))
     
     # seed policies synchronously
     seed_policies()

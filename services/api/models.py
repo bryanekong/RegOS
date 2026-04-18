@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Text, DateTime, JSON, BigInteger, Date, ForeignKey
+from sqlalchemy import Column, Text, DateTime, JSON, BigInteger, Date, ForeignKey, UniqueConstraint, Index
 from sqlalchemy.dialects.postgresql import UUID, ARRAY
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.sql import func
@@ -53,6 +53,17 @@ class RemediationTask(Base):
     owner = Column(Text, server_default='Compliance Team')
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
+    __table_args__ = (
+        UniqueConstraint(
+            'publication_id', 'policy_id', 'policy_section_id',
+            name='uq_remediation_task_pub_policy_section'
+        ),
+        Index('ix_remediation_task_publication_id', 'publication_id'),
+        Index('ix_remediation_task_policy_id', 'policy_id'),
+        Index('ix_remediation_task_status', 'status'),
+        Index('ix_remediation_task_deadline', 'deadline'),
+    )
+
 class PipelineQueue(Base):
     __tablename__ = "pipeline_queue"
 
@@ -60,5 +71,12 @@ class PipelineQueue(Base):
     stage = Column(Text, nullable=False)
     payload = Column(JSON, nullable=False)
     status = Column(Text, server_default='pending')
+    attempts = Column(BigInteger, server_default='0')
+    last_error = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     processed_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index('ix_pipeline_queue_status', 'status'),
+        Index('ix_pipeline_queue_stage_status', 'stage', 'status'),
+    )
