@@ -93,8 +93,14 @@ app.add_middleware(
 
 API_KEY = os.getenv('API_KEY')
 if not API_KEY:
-    raise RuntimeError(
-        "API_KEY environment variable is required. Refusing to start with a default key."
+    # Fall back to a randomly generated per-process key so the service still
+    # starts in environments that haven't set one, but make it extremely loud
+    # that this is happening and that requests won't authenticate across restarts.
+    import secrets
+    API_KEY = secrets.token_urlsafe(32)
+    logger.error(
+        "API_KEY env var is not set. Generated an ephemeral key for this process; "
+        "all external clients will fail to authenticate until API_KEY is configured."
     )
 
 @app.middleware("http")
