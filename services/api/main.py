@@ -74,11 +74,14 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="RegOS API", version="1.0.0", lifespan=lifespan)
 
-origins = [
-    "*",
-    "http://localhost:3000",
-    "http://localhost:5173"
-]
+# Comma-separated list of allowed origins, e.g.
+#   ALLOWED_ORIGINS="https://regos.vercel.app,http://localhost:5173"
+# A literal "*" is accepted for dev but logged as a warning at startup.
+_default_origins = "http://localhost:3000,http://localhost:5173"
+origins = [o.strip() for o in os.getenv('ALLOWED_ORIGINS', _default_origins).split(',') if o.strip()]
+
+if "*" in origins:
+    logger.warning("CORS allow_origins includes '*' — acceptable for local dev only.")
 
 app.add_middleware(
     CORSMiddleware,
@@ -88,7 +91,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-API_KEY = os.getenv('API_KEY', 'regos-proto-2026')
+API_KEY = os.getenv('API_KEY')
+if not API_KEY:
+    raise RuntimeError(
+        "API_KEY environment variable is required. Refusing to start with a default key."
+    )
 
 @app.middleware("http")
 async def api_key_validator(request: Request, call_next):

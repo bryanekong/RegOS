@@ -1,4 +1,36 @@
 from base_worker import BaseWorker
+from urllib.parse import urlparse
+import ipaddress
+import socket
+
+_FETCH_TIMEOUT = 15
+
+def _is_safe_fetch_url(url: str) -> bool:
+  """Block non-http(s) schemes and URLs that resolve to private/loopback/link-local
+  addresses. Prevents workers from being steered into fetching internal services
+  or cloud metadata endpoints (SSRF)."""
+  try:
+    parsed = urlparse(url)
+  except Exception:
+    return False
+  if parsed.scheme not in ('http', 'https'):
+    return False
+  host = parsed.hostname
+  if not host:
+    return False
+  try:
+    infos = socket.getaddrinfo(host, None)
+  except socket.gaierror:
+    return False
+  for info in infos:
+    addr = info[4][0]
+    try:
+      ip = ipaddress.ip_address(addr)
+    except ValueError:
+      continue
+    if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
+      return False
+  return True
 
 class Stage1Worker(BaseWorker):
   def __init__(self): super().__init__('stage1', 'stage2')
@@ -7,6 +39,10 @@ class Stage1Worker(BaseWorker):
     publication_id = payload['publication_id']
     pub = self.get_publication(publication_id)
     source_url = payload.get('source_url', '')
+
+    if source_url and not _is_safe_fetch_url(source_url):
+      self.logger.warning(f"Stage1: refusing unsafe source_url: {source_url}")
+      source_url = ''
 
     # 1. Fetch full text
     from bs4 import BeautifulSoup
@@ -21,7 +57,7 @@ class Stage1Worker(BaseWorker):
     full_text = ''
     if source_url.lower().endswith('.pdf'):
       import pdfplumber, httpx, io
-      resp = httpx.get(source_url, timeout=20, follow_redirects=True)
+      resp = httpx.get(source_url, timeout=_FETCH_TIMEOUT, follow_redirects=True)
       with pdfplumber.open(io.BytesIO(resp.content)) as pdf:
         full_text = '\n'.join(p.extract_text() or '' for p in pdf.pages)
     else:
@@ -37,7 +73,7 @@ class Stage1Worker(BaseWorker):
       if not full_text and source_url:
         import httpx
         try:
-          r = httpx.get(source_url, timeout=15, follow_redirects=True)
+          r = httpx.get(source_url, timeout=_FETCH_TIMEOUT, follow_redirects=True)
           full_text = _strip_html(r.text)
         except Exception:
           pass
