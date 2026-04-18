@@ -6,22 +6,58 @@ import { fetchTasks, updateTask } from '../api/client';
 import { Task } from '../types';
 import SeverityBadge from '../components/SeverityBadge';
 import { useRealtimeTasks } from '../hooks/useRealtimeTasks';
+import { useToast } from '../components/Toast';
+
+const COLUMNS = [
+  {
+    id: 'open' as const,
+    label: 'Open',
+    emptyIcon: '📋',
+    emptyText: 'No open tasks',
+    headerClass: 'text-blue-700 bg-blue-50 border border-blue-200',
+    columnClass: 'bg-blue-50/30',
+  },
+  {
+    id: 'in_progress' as const,
+    label: 'In Progress',
+    emptyIcon: '⚙️',
+    emptyText: 'Nothing in progress',
+    headerClass: 'text-amber-700 bg-amber-50 border border-amber-200',
+    columnClass: 'bg-amber-50/30',
+  },
+  {
+    id: 'done' as const,
+    label: 'Done',
+    emptyIcon: '✅',
+    emptyText: 'No completed tasks yet',
+    headerClass: 'text-green-700 bg-green-50 border border-green-200',
+    columnClass: 'bg-green-50/30',
+  },
+] as const;
+
+const CHANGE_TYPE_LABELS: Record<string, string> = {
+  NEW_REQUIREMENT: 'New Req.',
+  AMENDED_REQUIREMENT: 'Amended',
+  DEADLINE_CHANGE: 'Deadline',
+};
 
 export default function RemediationTracker() {
   const queryClient = useQueryClient();
+  const { toast } = useToast();
   const [severityFilter, setSeverityFilter] = useState<string>('All');
 
   const { data: tasks = [] } = useQuery({
     queryKey: ['tasks'],
-    queryFn: () => fetchTasks()
+    queryFn: () => fetchTasks(),
   });
 
-  useRealtimeTasks((newTask) => {
+  useRealtimeTasks(newTask => {
     queryClient.setQueryData(['tasks'], (oldTasks: Task[] | undefined) => {
-      const isExisting = (oldTasks || []).find(t => t.task_id === newTask.task_id);
-      if (isExisting) {
-        return (oldTasks || []).map(t => t.task_id === newTask.task_id ? newTask : t);
+      const exists = (oldTasks || []).find(t => t.task_id === newTask.task_id);
+      if (exists) {
+        return (oldTasks || []).map(t => (t.task_id === newTask.task_id ? newTask : t));
       }
+      toast('New remediation task received', 'info');
       return [newTask, ...(oldTasks || [])];
     });
   });
@@ -31,110 +67,167 @@ export default function RemediationTracker() {
     return tasks.filter(t => t.severity === severityFilter);
   }, [tasks, severityFilter]);
 
-  const columns = {
-    open: filteredTasks.filter(t => t.status === 'open'),
-    in_progress: filteredTasks.filter(t => t.status === 'in_progress'),
-    done: filteredTasks.filter(t => t.status === 'done')
-  };
+  const columns = useMemo(
+    () => ({
+      open: filteredTasks.filter(t => t.status === 'open'),
+      in_progress: filteredTasks.filter(t => t.status === 'in_progress'),
+      done: filteredTasks.filter(t => t.status === 'done'),
+    }),
+    [filteredTasks]
+  );
 
   const handleDragEnd = async (result: DropResult) => {
     if (!result.destination) return;
-    
     const sourceCol = result.source.droppableId;
     const destCol = result.destination.droppableId;
     const taskId = result.draggableId;
-    
     if (sourceCol === destCol && result.source.index === result.destination.index) return;
-    
-    queryClient.setQueryData(['tasks'], (oldTasks: Task[] | undefined) => {
-      return (oldTasks || []).map(t => {
-        if (t.task_id === taskId) {
-          return { ...t, status: destCol };
-        }
-        return t;
-      });
-    });
+
+    queryClient.setQueryData(['tasks'], (oldTasks: Task[] | undefined) =>
+      (oldTasks || []).map(t => (t.task_id === taskId ? { ...t, status: destCol } : t))
+    );
 
     try {
       await updateTask(taskId, { status: destCol });
-    } catch (e) {
-      console.error('Failed to update task status', e);
+    } catch {
+      toast('Failed to update task status', 'error');
       queryClient.invalidateQueries({ queryKey: ['tasks'] });
     }
   };
 
+  const totalTasks = tasks.length;
+
   return (
     <div className="h-[calc(100vh-8rem)] flex flex-col">
-      <div className="mb-6 flex justify-between items-center shrink-0">
+      {/* Header */}
+      <div className="mb-5 flex justify-between items-start shrink-0 gap-4">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Remediation Tracker</h1>
-          <p className="text-gray-600 mt-2">Manage policy updates prompted by regulatory change.</p>
+          <p className="text-gray-500 text-sm mt-1">
+            {totalTasks > 0
+              ? `${totalTasks} task${totalTasks !== 1 ? 's' : ''} across all stages`
+              : 'Manage policy updates prompted by regulatory change.'}
+          </p>
         </div>
-        <div className="flex space-x-2">
+        <div className="flex gap-1.5 shrink-0">
           {['All', 'CRITICAL', 'HIGH', 'MEDIUM', 'LOW'].map(sev => (
             <button
               key={sev}
               onClick={() => setSeverityFilter(sev)}
-              className={`px-3 py-1 text-sm rounded ${severityFilter === sev ? 'bg-blue-900 text-white' : 'bg-white text-gray-600 border border-gray-300 hover:bg-gray-50'}`}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all ${
+                severityFilter === sev
+                  ? 'bg-blue-900 text-white border-blue-900'
+                  : 'bg-white text-gray-600 border-gray-300 hover:border-gray-400 hover:bg-gray-50'
+              }`}
             >
-              {sev}
+              {sev === 'All' ? 'All' : sev.charAt(0) + sev.slice(1).toLowerCase()}
             </button>
           ))}
         </div>
       </div>
 
+      {/* Kanban */}
       <DragDropContext onDragEnd={handleDragEnd}>
-        <div className="flex flex-1 space-x-6 overflow-hidden">
-          {(['open', 'in_progress', 'done'] as const).map(colId => (
-            <div key={colId} className="flex-1 flex flex-col bg-gray-100/50 rounded-lg p-4 max-h-full">
-              <h2 className="font-semibold text-gray-700 mb-4 uppercase text-sm px-2">
-                {colId.replace('_', ' ')} <span className="text-gray-400 bg-gray-200 rounded-full px-2 py-0.5 text-xs ml-2">{columns[colId].length}</span>
-              </h2>
-              <Droppable droppableId={colId}>
-                {(provided) => (
-                  <div
-                    ref={provided.innerRef}
-                    {...provided.droppableProps}
-                    className="flex-1 overflow-y-auto min-h-[150px]"
-                  >
-                    {columns[colId].map((task, index) => (
-                      <Draggable key={task.task_id} draggableId={task.task_id} index={index}>
-                        {(provided) => (
-                          <div
-                            ref={provided.innerRef}
-                            {...provided.draggableProps}
-                            {...provided.dragHandleProps}
-                            className="bg-white shadow-sm hover:shadow rounded-lg p-3 mb-3 border border-gray-100"
-                          >
-                            <div className="flex justify-between items-start mb-2">
-                              <SeverityBadge severity={task.severity || 'LOW'} />
-                              <span className="bg-purple-100 text-purple-800 text-xs px-2 py-0.5 rounded font-medium">
-                                {(task.change_type || '').replace('_', ' ')}
-                              </span>
-                            </div>
-                            <p className="text-sm text-gray-800 line-clamp-2 mt-2 leading-snug">
-                              {task.action_text}
-                            </p>
-                            <div className="flex justify-between items-center mt-3 pt-3 border-t border-gray-50">
-                              <span className="text-xs text-gray-500 font-medium">
-                                {task.section_title}
-                              </span>
-                              <span className={`text-xs font-semibold ${new Date(task.deadline || '') < new Date() ? 'text-red-600' : 'text-gray-500'}`}>
-                                {task.deadline ? format(new Date(task.deadline), 'dd MMM yyyy') : ''}
-                              </span>
-                            </div>
-                          </div>
-                        )}
-                      </Draggable>
-                    ))}
-                    {provided.placeholder}
-                  </div>
-                )}
-              </Droppable>
-            </div>
-          ))}
+        <div className="flex flex-1 gap-5 overflow-hidden">
+          {COLUMNS.map(col => {
+            const colTasks = columns[col.id];
+            return (
+              <div
+                key={col.id}
+                className={`flex-1 flex flex-col rounded-xl border border-gray-200 overflow-hidden ${col.columnClass}`}
+              >
+                {/* Column header */}
+                <div className={`flex items-center justify-between px-4 py-3 border-b border-gray-200`}>
+                  <span className={`text-xs font-bold uppercase tracking-wide px-2 py-1 rounded-md ${col.headerClass}`}>
+                    {col.label}
+                  </span>
+                  <span className="text-xs font-semibold text-gray-400 bg-white border border-gray-200 rounded-full px-2 py-0.5">
+                    {colTasks.length}
+                  </span>
+                </div>
+
+                {/* Droppable area */}
+                <Droppable droppableId={col.id}>
+                  {(provided, snapshot) => (
+                    <div
+                      ref={provided.innerRef}
+                      {...provided.droppableProps}
+                      className={`flex-1 overflow-y-auto p-3 transition-colors ${
+                        snapshot.isDraggingOver ? 'bg-blue-50/50' : ''
+                      }`}
+                    >
+                      {colTasks.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center h-32 text-center">
+                          <span className="text-2xl mb-2">{col.emptyIcon}</span>
+                          <p className="text-xs text-gray-400 font-medium">{col.emptyText}</p>
+                        </div>
+                      ) : (
+                        colTasks.map((task, index) => (
+                          <TaskCard key={task.task_id} task={task} index={index} />
+                        ))
+                      )}
+                      {provided.placeholder}
+                    </div>
+                  )}
+                </Droppable>
+              </div>
+            );
+          })}
         </div>
       </DragDropContext>
     </div>
+  );
+}
+
+function TaskCard({ task, index }: { task: Task; index: number }) {
+  const isOverdue = task.deadline ? new Date(task.deadline) < new Date() : false;
+  const changeLabel = CHANGE_TYPE_LABELS[task.change_type] ?? task.change_type;
+
+  return (
+    <Draggable draggableId={task.task_id} index={index}>
+      {(provided, snapshot) => (
+        <div
+          ref={provided.innerRef}
+          {...provided.draggableProps}
+          {...provided.dragHandleProps}
+          className={`bg-white rounded-lg mb-2.5 border transition-shadow ${
+            snapshot.isDragging
+              ? 'shadow-lg border-blue-300 rotate-1'
+              : 'shadow-sm border-gray-100 hover:shadow-md'
+          }`}
+        >
+          <div className="p-3">
+            {/* Top row: severity + change type */}
+            <div className="flex items-center justify-between mb-2">
+              <SeverityBadge severity={task.severity || 'LOW'} />
+              <span className="bg-purple-100 text-purple-800 text-xs px-2 py-0.5 rounded-full font-semibold">
+                {changeLabel}
+              </span>
+            </div>
+
+            {/* Action text */}
+            <p className="text-xs text-gray-700 line-clamp-2 leading-relaxed">{task.action_text}</p>
+
+            {/* Footer */}
+            <div className="flex justify-between items-center mt-2.5 pt-2.5 border-t border-gray-50">
+              <span className="text-xs text-gray-400 truncate max-w-[55%]" title={task.section_title}>
+                {task.section_title}
+              </span>
+              {task.deadline && (
+                <span
+                  className={`text-xs font-semibold ${
+                    isOverdue ? 'text-red-600' : 'text-gray-500'
+                  }`}
+                  title={isOverdue ? 'Overdue' : ''}
+                >
+                  {isOverdue && '⚠ '}
+                  {format(new Date(task.deadline), 'dd MMM yyyy')}
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </Draggable>
   );
 }
