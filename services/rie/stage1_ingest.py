@@ -9,6 +9,15 @@ class Stage1Worker(BaseWorker):
     source_url = payload.get('source_url', '')
 
     # 1. Fetch full text
+    from bs4 import BeautifulSoup
+    import re as _re
+
+    def _looks_like_html(text: str) -> bool:
+      return bool(_re.search(r'<\s*(html|head|body|meta|div|span|p)\b', text, _re.IGNORECASE))
+
+    def _strip_html(text: str) -> str:
+      return BeautifulSoup(text, 'lxml').get_text(separator=' ', strip=True)
+
     full_text = ''
     if source_url.lower().endswith('.pdf'):
       import pdfplumber, httpx, io
@@ -17,13 +26,19 @@ class Stage1Worker(BaseWorker):
         full_text = '\n'.join(p.extract_text() or '' for p in pdf.pages)
     else:
       import trafilatura
-      full_text = trafilatura.fetch_url(source_url) or ''
+      raw = trafilatura.fetch_url(source_url) or ''
+      # trafilatura can return raw HTML when extraction fails — detect and clean it
+      if raw and _looks_like_html(raw):
+        self.logger.warning(f"Stage1: trafilatura returned HTML for {source_url}, stripping tags")
+        full_text = _strip_html(raw)
+      else:
+        full_text = raw
+
       if not full_text and source_url:
         import httpx
-        from bs4 import BeautifulSoup
         try:
           r = httpx.get(source_url, timeout=15, follow_redirects=True)
-          full_text = BeautifulSoup(r.text, 'lxml').get_text(separator=' ', strip=True)
+          full_text = _strip_html(r.text)
         except Exception:
           pass
     if not full_text:
