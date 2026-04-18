@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import Navbar from './components/Navbar';
 import { ToastProvider } from './components/Toast';
+import ErrorBoundary from './components/ErrorBoundary';
 import Dashboard from './pages/Dashboard';
 import ImpactFeed from './pages/ImpactFeed';
 import PolicyMap from './pages/PolicyMap';
@@ -19,11 +20,31 @@ function App() {
             <Navbar />
             <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8">
               <Routes>
-                <Route path="/" element={<Dashboard />} />
-                <Route path="/feed" element={<ImpactFeed />} />
-                <Route path="/publications/:id" element={<PublicationDetail />} />
-                <Route path="/policies" element={<PolicyMap />} />
-                <Route path="/tasks" element={<RemediationTracker />} />
+                <Route path="/" element={
+                  <ErrorBoundary label="Dashboard">
+                    <Dashboard />
+                  </ErrorBoundary>
+                } />
+                <Route path="/feed" element={
+                  <ErrorBoundary label="Impact Feed">
+                    <ImpactFeed />
+                  </ErrorBoundary>
+                } />
+                <Route path="/publications/:id" element={
+                  <ErrorBoundary label="Publication Detail">
+                    <PublicationDetail />
+                  </ErrorBoundary>
+                } />
+                <Route path="/policies" element={
+                  <ErrorBoundary label="Policy Map">
+                    <PolicyMap />
+                  </ErrorBoundary>
+                } />
+                <Route path="/tasks" element={
+                  <ErrorBoundary label="Remediation Tracker">
+                    <RemediationTracker />
+                  </ErrorBoundary>
+                } />
               </Routes>
             </main>
           </div>
