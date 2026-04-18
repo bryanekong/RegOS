@@ -2,9 +2,10 @@ import { Link, useLocation } from 'react-router-dom';
 import { usePipelineStatus } from '../hooks/usePipelineStatus';
 
 const navLinks = [
-  { to: '/', label: 'Impact Feed' },
-  { to: '/policies', label: 'Policy Map' },
-  { to: '/tasks', label: 'Remediation Tracker' },
+  { to: '/', label: 'Dashboard', exact: true },
+  { to: '/feed', label: 'Impact Feed', exact: false },
+  { to: '/policies', label: 'Policy Map', exact: false },
+  { to: '/tasks', label: 'Remediation Tracker', exact: false },
 ];
 
 export default function Navbar() {
@@ -30,9 +31,10 @@ export default function Navbar() {
               </Link>
             </div>
             <div className="ml-8 flex space-x-1">
-              {navLinks.map(({ to, label }) => {
-                const isActive =
-                  to === '/' ? location.pathname === '/' : location.pathname.startsWith(to);
+              {navLinks.map(({ to, label, exact }) => {
+                const isActive = exact
+                  ? location.pathname === to
+                  : location.pathname.startsWith(to);
                 return (
                   <Link
                     key={to}

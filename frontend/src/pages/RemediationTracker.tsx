@@ -1,7 +1,8 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { DragDropContext, Droppable, Draggable, DropResult } from 'react-beautiful-dnd';
 import { format } from 'date-fns';
+import { Pencil, Check, X } from 'lucide-react';
 import { fetchTasks, updateTask } from '../api/client';
 import { Task } from '../types';
 import SeverityBadge from '../components/SeverityBadge';
@@ -179,6 +180,76 @@ export default function RemediationTracker() {
   );
 }
 
+function OwnerEditor({ task }: { task: Task }) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(task.owner || 'Compliance Team');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (editing) inputRef.current?.focus();
+  }, [editing]);
+
+  const save = async () => {
+    const trimmed = value.trim();
+    if (!trimmed || trimmed === task.owner) {
+      setEditing(false);
+      return;
+    }
+    try {
+      await updateTask(task.task_id, { owner: trimmed });
+      queryClient.setQueryData(['tasks'], (old: Task[] | undefined) =>
+        (old || []).map(t => (t.task_id === task.task_id ? { ...t, owner: trimmed } : t))
+      );
+      toast('Owner updated', 'success');
+    } catch {
+      toast('Failed to update owner', 'error');
+      setValue(task.owner || 'Compliance Team');
+    }
+    setEditing(false);
+  };
+
+  const cancel = () => {
+    setValue(task.owner || 'Compliance Team');
+    setEditing(false);
+  };
+
+  if (editing) {
+    return (
+      <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+        <input
+          ref={inputRef}
+          value={value}
+          onChange={e => setValue(e.target.value)}
+          onKeyDown={e => {
+            if (e.key === 'Enter') save();
+            if (e.key === 'Escape') cancel();
+          }}
+          className="text-xs border border-blue-400 rounded px-1.5 py-0.5 w-28 focus:outline-none focus:ring-1 focus:ring-blue-500"
+        />
+        <button onClick={save} className="text-green-600 hover:text-green-800" aria-label="Save owner">
+          <Check className="h-3.5 w-3.5" />
+        </button>
+        <button onClick={cancel} className="text-gray-400 hover:text-gray-600" aria-label="Cancel">
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <button
+      onClick={e => { e.stopPropagation(); setEditing(true); }}
+      className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-700 transition-colors group/owner"
+      title="Click to reassign owner"
+    >
+      <span className="truncate max-w-[80px]">{task.owner || 'Unassigned'}</span>
+      <Pencil className="h-3 w-3 opacity-0 group-hover/owner:opacity-100 transition-opacity shrink-0" />
+    </button>
+  );
+}
+
 function TaskCard({ task, index }: { task: Task; index: number }) {
   const isOverdue = task.deadline ? new Date(task.deadline) < new Date() : false;
   const changeLabel = CHANGE_TYPE_LABELS[task.change_type] ?? task.change_type;
@@ -210,15 +281,11 @@ function TaskCard({ task, index }: { task: Task; index: number }) {
 
             {/* Footer */}
             <div className="flex justify-between items-center mt-2.5 pt-2.5 border-t border-gray-50">
-              <span className="text-xs text-gray-400 truncate max-w-[55%]" title={task.section_title}>
-                {task.section_title}
-              </span>
+              <OwnerEditor task={task} />
               {task.deadline && (
                 <span
-                  className={`text-xs font-semibold ${
-                    isOverdue ? 'text-red-600' : 'text-gray-500'
-                  }`}
-                  title={isOverdue ? 'Overdue' : ''}
+                  className={`text-xs font-semibold ${isOverdue ? 'text-red-600' : 'text-gray-500'}`}
+                  title={isOverdue ? 'Overdue' : undefined}
                 >
                   {isOverdue && '⚠ '}
                   {format(new Date(task.deadline), 'dd MMM yyyy')}

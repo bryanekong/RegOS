@@ -8,7 +8,14 @@ const api = axios.create({
   }
 });
 
-export const fetchPublications = async (params?: Record<string, string>): Promise<Publication[]> => {
+export interface PublicationFilters {
+  severity?: string;
+  framework?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export const fetchPublications = async (params?: PublicationFilters): Promise<Publication[]> => {
   const { data } = await api.get('/api/publications', { params });
   return data;
 };
@@ -43,7 +50,7 @@ export const fetchPipelineStatus = async (): Promise<PipelineStatus> => {
   return data;
 };
 
-export const triggerIngest = async (): Promise<{ triggered: boolean, publication_id: string }> => {
+export const triggerIngest = async (): Promise<{ triggered: boolean; publication_id: string }> => {
   const { data } = await api.post('/api/ingest/trigger');
   return data;
 };

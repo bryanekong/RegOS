@@ -6,6 +6,12 @@ export interface Classification {
   affected_provisions: string[];
 }
 
+export interface PublicationSection {
+  id: string;
+  title: string;
+  text: string;
+}
+
 export interface Publication {
   publication_id: string;
   title: string;
@@ -16,6 +22,8 @@ export interface Publication {
   status: string;
   ingested_at: string | null;
   summary: string;
+  full_text?: string;
+  sections?: PublicationSection[];
 }
 
 export interface PolicySection {
