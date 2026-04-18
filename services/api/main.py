@@ -41,7 +41,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="RegOS API", version="1.0.0", lifespan=lifespan)
 
 origins = [
-    "https://*.vercel.app",
+    "*",
     "http://localhost:3000",
     "http://localhost:5173"
 ]
@@ -49,7 +49,7 @@ origins = [
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
