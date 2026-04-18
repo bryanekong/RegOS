@@ -70,3 +70,7 @@ temp/
 *.swo
 .project
 .settings/
+
+# Claude worktrees
+.claude/worktrees/
+
