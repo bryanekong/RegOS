@@ -32,7 +32,7 @@ class Stage3Worker(BaseWorker):
       keyword_score = sum(1 for kw in self.keywords if kw.lower() in title.lower())
       score = (direct_overlap * 40) + (min(keyword_score, 3) * 10) + 20 + 10
 
-      if score > 40:
+      if score >= 30:
         self.publish_next({
           **payload,
           'policy_id': str(policy_id),
