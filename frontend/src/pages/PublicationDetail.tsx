@@ -6,6 +6,23 @@ import { fetchPublication } from '../api/client';
 import SeverityBadge from '../components/SeverityBadge';
 import UrgencyBadge from '../components/UrgencyBadge';
 
+function stripHtml(text: string): string {
+  try {
+    const doc = new DOMParser().parseFromString(text, 'text/html');
+    return doc.body.textContent?.trim() ?? text;
+  } catch {
+    return text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+}
+
+function isHtmlContent(text: string): boolean {
+  return /<\s*(html|head|body|meta|div|span|p)\b/i.test(text);
+}
+
+function cleanSectionText(text: string): string {
+  return isHtmlContent(text) ? stripHtml(text) : text;
+}
+
 const DOC_TYPE_LABELS: Record<string, string> = {
   FinalRule: 'Final Rule',
   ConsultationPaper: 'Consultation Paper',
@@ -238,7 +255,7 @@ export default function PublicationDetail() {
                   <span className="text-sm font-semibold text-gray-800">{section.title}</span>
                 </div>
                 <div className="px-4 py-3">
-                  <p className="text-sm text-gray-600 leading-relaxed">{section.text}</p>
+                  <p className="text-sm text-gray-600 leading-relaxed">{cleanSectionText(section.text)}</p>
                 </div>
               </div>
             ))}
