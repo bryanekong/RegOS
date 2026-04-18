@@ -1,37 +1,3 @@
 [build]
 builder = "dockerfile"
-
-[[services]]
-name = "api"
-source = "services/api"
-startCommand = "uvicorn main:app --host 0.0.0.0 --port 8000"
-
-[[services]]
-name = "ingestion"
-source = "services/ingestion"
-startCommand = "python main.py"
-
-[[services]]
-name = "rie-stage1"
-source = "services/rie"
-startCommand = "python stage1_ingest.py"
-
-[[services]]
-name = "rie-stage2"
-source = "services/rie"
-startCommand = "python stage2_classify.py"
-
-[[services]]
-name = "rie-stage3"
-source = "services/rie"
-startCommand = "python stage3_map.py"
-
-[[services]]
-name = "rie-stage4"
-source = "services/rie"
-startCommand = "python stage4_delta.py"
-
-[[services]]
-name = "rie-stage5"
-source = "services/rie"
-startCommand = "python stage5_action.py"
+dockerfilePath = "Dockerfile"
