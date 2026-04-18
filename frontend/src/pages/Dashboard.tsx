@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { format, isAfter, subDays, formatDistanceToNow } from 'date-fns';
+import { format, isAfter, subHours, formatDistanceToNow } from 'date-fns';
 import {
   AlertTriangle,
   FileText,
@@ -11,9 +11,18 @@ import {
   Clock,
   CheckCircle,
   Loader,
+  Info,
 } from 'lucide-react';
 import { fetchTasks, fetchPublications, fetchPolicies, fetchPipelineStatus } from '../api/client';
 import SeverityBadge from '../components/SeverityBadge';
+
+const STAGE_LABELS: Record<string, string> = {
+  stage1: 'Ingest',
+  stage2: 'Classify',
+  stage3: 'Map',
+  stage4: 'Delta',
+  stage5: 'Action',
+};
 
 function StatCard({
   label,
@@ -48,9 +57,7 @@ function StatCard({
           <p className="text-xs text-gray-400 mt-1 truncate">{sub}</p>
         )}
       </div>
-      {to && (
-        <ArrowRight className="h-4 w-4 text-gray-300 shrink-0 self-center" />
-      )}
+      {to && <ArrowRight className="h-4 w-4 text-gray-300 shrink-0 self-center" />}
     </div>
   );
 
@@ -75,7 +82,7 @@ export default function Dashboard() {
 
   const { data: publications = [], isLoading: pubsLoading } = useQuery({
     queryKey: ['publications', ''],
-    queryFn: () => fetchPublications({ limit: 100 }),
+    queryFn: () => fetchPublications({ limit: 200 }),
     refetchInterval: 30000,
   });
 
@@ -92,6 +99,7 @@ export default function Dashboard() {
 
   const openTasks = useMemo(() => tasks.filter(t => t.status === 'open'), [tasks]);
   const inProgressTasks = useMemo(() => tasks.filter(t => t.status === 'in_progress'), [tasks]);
+  const doneTasks = useMemo(() => tasks.filter(t => t.status === 'done'), [tasks]);
 
   const tasksBySeverity = useMemo(
     () => ({
@@ -108,12 +116,10 @@ export default function Dashboard() {
     [openTasks]
   );
 
-  const sevenDaysAgo = subDays(new Date(), 7);
-  const recentPubs = useMemo(
-    () =>
-      publications.filter(
-        p => p.ingested_at && isAfter(new Date(p.ingested_at), sevenDaysAgo)
-      ),
+  // Last 24 hours instead of last 7 days — more meaningful for a live demo
+  const oneDayAgo = subHours(new Date(), 24);
+  const last24hPubs = useMemo(
+    () => publications.filter(p => p.ingested_at && isAfter(new Date(p.ingested_at), oneDayAgo)),
     [publications]
   );
 
@@ -129,20 +135,30 @@ export default function Dashboard() {
       )
     : null;
 
-  const lastIngestion =
-    pipelineStatus?.last_ingestion
-      ? formatDistanceToNow(new Date(pipelineStatus.last_ingestion), { addSuffix: true })
-      : 'Never';
+  const lastIngestion = pipelineStatus?.last_ingestion
+    ? formatDistanceToNow(new Date(pipelineStatus.last_ingestion), { addSuffix: true })
+    : 'Never';
 
-  const recentFive = useMemo(
-    () =>
-      [...publications]
-        .sort((a, b) =>
-          new Date(b.ingested_at ?? 0).getTime() - new Date(a.ingested_at ?? 0).getTime()
-        )
-        .slice(0, 5),
-    [publications]
-  );
+  // Deduplicate recent publications by title before displaying
+  const recentFive = useMemo(() => {
+    const seen = new Set<string>();
+    return [...publications]
+      .sort((a, b) =>
+        new Date(b.ingested_at ?? 0).getTime() - new Date(a.ingested_at ?? 0).getTime()
+      )
+      .filter(p => {
+        if (seen.has(p.title)) return false;
+        seen.add(p.title);
+        return true;
+      })
+      .slice(0, 5);
+  }, [publications]);
+
+  // Unique publication count (by title) for the stat card
+  const uniquePubCount = useMemo(() => {
+    const titles = new Set(publications.map(p => p.title));
+    return titles.size;
+  }, [publications]);
 
   return (
     <div className="py-8 max-w-6xl mx-auto">
@@ -153,7 +169,7 @@ export default function Dashboard() {
         </p>
       </div>
 
-      {/* Top stat cards */}
+      {/* Stat cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         <StatCard
           label="Open Tasks"
@@ -165,9 +181,9 @@ export default function Dashboard() {
           to="/tasks"
         />
         <StatCard
-          label="Publications This Week"
-          value={recentPubs.length}
-          sub={`${publications.length} total`}
+          label="Publications (24h)"
+          value={last24hPubs.length}
+          sub={`${uniquePubCount} unique total`}
           icon={<FileText className="h-5 w-5 text-blue-600" />}
           accent="bg-blue-50"
           loading={pubsLoading}
@@ -208,30 +224,35 @@ export default function Dashboard() {
               ))}
             </div>
           ) : (
-            <div className="space-y-3">
-              <SeverityRow label="Critical" count={tasksBySeverity.CRITICAL} color="bg-red-500" />
-              <SeverityRow label="High" count={tasksBySeverity.HIGH} color="bg-orange-500" />
-              <SeverityRow label="Medium" count={tasksBySeverity.MEDIUM} color="bg-yellow-400" />
-              <SeverityRow label="Low" count={tasksBySeverity.LOW} color="bg-blue-300" />
-              <div className="border-t border-gray-100 pt-3 mt-3">
-                <div className="flex items-center gap-3">
-                  <Loader className="h-2.5 w-2.5 text-amber-500 shrink-0" />
-                  <span className="text-sm text-gray-600 flex-1">In Progress</span>
-                  <span className="text-sm font-semibold text-gray-800">{inProgressTasks.length}</span>
-                </div>
-                <div className="flex items-center gap-3 mt-2">
-                  <CheckCircle className="h-2.5 w-2.5 text-green-500 shrink-0" />
-                  <span className="text-sm text-gray-600 flex-1">Done</span>
-                  <span className="text-sm font-semibold text-gray-800">
-                    {tasks.filter(t => t.status === 'done').length}
-                  </span>
+            <>
+              <div className="space-y-3">
+                <SeverityRow label="Critical" count={tasksBySeverity.CRITICAL} color="bg-red-500" />
+                <SeverityRow label="High" count={tasksBySeverity.HIGH} color="bg-orange-500" />
+                <SeverityRow label="Medium" count={tasksBySeverity.MEDIUM} color="bg-yellow-400" />
+                <SeverityRow label="Low" count={tasksBySeverity.LOW} color="bg-blue-300" />
+                <div className="border-t border-gray-100 pt-3 mt-3">
+                  <div className="flex items-center gap-3">
+                    <Loader className="h-2.5 w-2.5 text-amber-500 shrink-0" />
+                    <span className="text-sm text-gray-600 flex-1">In Progress</span>
+                    <span className="text-sm font-semibold text-gray-800">{inProgressTasks.length}</span>
+                  </div>
+                  <div className="flex items-center gap-3 mt-2">
+                    <CheckCircle className="h-2.5 w-2.5 text-green-500 shrink-0" />
+                    <span className="text-sm text-gray-600 flex-1">Done</span>
+                    <span className="text-sm font-semibold text-gray-800">{doneTasks.length}</span>
+                  </div>
                 </div>
               </div>
-            </div>
+              {/* Accumulation note */}
+              <div className="mt-4 pt-3 border-t border-gray-100 flex items-start gap-2 text-xs text-gray-400">
+                <Info className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                <span>Tasks accumulate across pipeline runs. Use the Remediation Tracker to close completed items.</span>
+              </div>
+            </>
           )}
         </div>
 
-        {/* Pipeline queue breakdown */}
+        {/* Pipeline stages */}
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
           <div className="flex items-center justify-between mb-4">
             <h2 className="font-semibold text-gray-800">Pipeline Stages</h2>
@@ -251,13 +272,16 @@ export default function Dashboard() {
             <div className="space-y-2.5">
               {Object.entries(pipelineStatus.queues).map(([stage, counts]) => {
                 const hasPending = (counts.pending || 0) + (counts.processing || 0) > 0;
+                const label = STAGE_LABELS[stage] ?? stage;
+                const stageNum = stage.replace('stage', '');
                 return (
                   <div key={stage} className="flex items-center gap-2">
                     <span
                       className={`h-2 w-2 rounded-full shrink-0 ${hasPending ? 'bg-amber-400' : 'bg-green-400'}`}
                     />
-                    <span className="text-sm text-gray-600 flex-1 capitalize">
-                      {stage.replace('stage', 'Stage ')}
+                    <span className="text-sm text-gray-600 flex-1">
+                      <span className="text-gray-400 text-xs mr-1">S{stageNum}</span>
+                      {label}
                     </span>
                     <div className="flex gap-2 text-xs font-medium">
                       {counts.pending > 0 && (
@@ -280,7 +304,7 @@ export default function Dashboard() {
           )}
         </div>
 
-        {/* Recent publications */}
+        {/* Recent publications — deduplicated */}
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
           <div className="flex items-center justify-between mb-4">
             <h2 className="font-semibold text-gray-800">Recent Publications</h2>
@@ -312,11 +336,11 @@ export default function Dashboard() {
                   to={`/publications/${pub.publication_id}`}
                   className="block group"
                 >
-                  <p className="text-sm font-medium text-gray-800 line-clamp-1 group-hover:text-blue-700 transition-colors">
+                  <p className="text-sm font-medium text-gray-800 line-clamp-2 leading-snug group-hover:text-blue-700 transition-colors">
                     {pub.title}
                   </p>
-                  <div className="flex items-center gap-2 mt-0.5">
-                    <Clock className="h-3 w-3 text-gray-300" />
+                  <div className="flex items-center gap-2 mt-1">
+                    <Clock className="h-3 w-3 text-gray-300 shrink-0" />
                     <span className="text-xs text-gray-400">
                       {pub.ingested_at
                         ? formatDistanceToNow(new Date(pub.ingested_at), { addSuffix: true })
