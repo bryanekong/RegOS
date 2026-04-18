@@ -47,7 +47,8 @@ async def trigger_demo_ingest(db: AsyncSession = Depends(get_db)):
     pub_date = datetime.now(timezone.utc)
     title = 'FCA Consumer Duty: Final Guidance on Monitoring Consumer Outcomes'
     source_url = 'https://www.fca.org.uk/publications/finalised-guidance/fg22-5-consumer-duty'
-    content_hash = hashlib.sha256((title + source_url + str(pub_date)).encode()).hexdigest()
+    # Hash on title+url only (not timestamp) so repeated triggers reuse the same publication
+    content_hash = hashlib.sha256((title + source_url).encode()).hexdigest()
     
     pub_data = {
         "source": 'FCA',
@@ -73,13 +74,19 @@ async def trigger_demo_ingest(db: AsyncSession = Depends(get_db)):
         res = await db.execute(query)
         pub_id = res.scalar_one()
         
-    queue_data = {
-        "stage": "stage1",
-        "payload": {
-            "publication_id": str(pub_id)
+    # Only queue a new run if no active run exists for this publication
+    active_check = select(func.count(PipelineQueue.id)).where(
+        PipelineQueue.payload.op('->>')('publication_id') == str(pub_id),
+        PipelineQueue.status.in_(['pending', 'processing'])
+    )
+    active_count = (await db.execute(active_check)).scalar_one()
+
+    if active_count == 0:
+        queue_data = {
+            "stage": "stage1",
+            "payload": {"publication_id": str(pub_id)}
         }
-    }
-    await db.execute(insert(PipelineQueue).values(**queue_data))
-    await db.commit()
-    
+        await db.execute(insert(PipelineQueue).values(**queue_data))
+        await db.commit()
+
     return {"triggered": True, "publication_id": str(pub_id)}
