@@ -50,20 +50,31 @@ class BaseWorker:
       if not row:
         return  # another worker claimed it
       payload = row[0]
+      # Propagate a correlation id across all stages of a single publication's
+      # trip through the pipeline so logs can be grepped end-to-end.
+      trace_id = payload.get('trace_id')
+      if not trace_id:
+        import uuid
+        trace_id = uuid.uuid4().hex[:12]
+        payload['trace_id'] = trace_id
+      self._current_trace = trace_id
       try:
-        self.logger.info(f"Processing queue_id={queue_id}, payload keys: {list(payload.keys())}")
+        self.logger.info(
+          f"[trace={trace_id}] Processing queue_id={queue_id}, payload keys: {list(payload.keys())}"
+        )
         self.process(payload)
         self.cur.execute(
           "UPDATE pipeline_queue SET status='done', processed_at=now(), last_error=NULL WHERE id=%s",
           (queue_id,)
         )
+        self.logger.info(f"[trace={trace_id}] queue_id={queue_id} done")
       except Exception as e:
         # Retry up to MAX_ATTEMPTS-1 times before dead-lettering to 'failed'.
         # On retry, status goes back to 'pending' so another NOTIFY or the
         # stuck-job sweeper will pick it up.
         MAX_ATTEMPTS = 3
         err_msg = f"{type(e).__name__}: {e}"[:1000]
-        self.logger.error(f"Stage failed for queue_id={queue_id}: {e}", exc_info=True)
+        self.logger.error(f"[trace={trace_id}] Stage failed for queue_id={queue_id}: {e}", exc_info=True)
         self.cur.execute(
           """UPDATE pipeline_queue
              SET attempts = COALESCE(attempts, 0) + 1,
