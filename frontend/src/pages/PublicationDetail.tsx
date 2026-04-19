@@ -5,6 +5,15 @@ import { ArrowLeft, ExternalLink, FileText, AlertTriangle, Clock } from 'lucide-
 import { fetchPublication } from '../api/client';
 import SeverityBadge from '../components/SeverityBadge';
 import UrgencyBadge from '../components/UrgencyBadge';
+import {
+  DOC_TYPE_LABEL,
+  PUBLICATION_STATUS_PILL,
+  CHANGE_TYPE_LABEL,
+  TASK_STATUS_LABEL,
+  TASK_STATUS_PILL,
+  TaskStatus,
+} from '../constants/taskStyles';
+import { isOverdue } from '../utils/dates';
 
 function stripHtml(text: string): string {
   try {
@@ -22,27 +31,6 @@ function isHtmlContent(text: string): boolean {
 function cleanSectionText(text: string): string {
   return isHtmlContent(text) ? stripHtml(text) : text;
 }
-
-const DOC_TYPE_LABELS: Record<string, string> = {
-  FinalRule: 'Final Rule',
-  ConsultationPaper: 'Consultation Paper',
-  DearCEOLetter: 'Dear CEO Letter',
-  GuidanceNote: 'Guidance Note',
-};
-
-const STATUS_STYLES: Record<string, string> = {
-  pending: 'bg-gray-100 text-gray-500',
-  ingested: 'bg-blue-50 text-blue-600',
-  classified: 'bg-indigo-50 text-indigo-600',
-  actioned: 'bg-green-50 text-green-700',
-  skipped: 'bg-gray-50 text-gray-400',
-};
-
-const CHANGE_TYPE_LABELS: Record<string, string> = {
-  NEW_REQUIREMENT: 'New Requirement',
-  AMENDED_REQUIREMENT: 'Amended Requirement',
-  DEADLINE_CHANGE: 'Deadline Change',
-};
 
 function SkeletonBlock({ className }: { className: string }) {
   return <div className={`bg-gray-200 rounded animate-pulse ${className}`} />;
@@ -91,10 +79,10 @@ export default function PublicationDetail() {
     pub.classification ?? {};
   const pubDate = pub.pub_date ? new Date(pub.pub_date) : null;
   const ingestedDate = pub.ingested_at ? new Date(pub.ingested_at) : null;
-  const statusStyle = STATUS_STYLES[pub.status] ?? STATUS_STYLES['pending'];
+  const statusStyle = PUBLICATION_STATUS_PILL[pub.status] ?? PUBLICATION_STATUS_PILL['pending'];
 
   const openTasks = tasks.filter(t => t.status === 'open');
-  const isOverallOverdue = openTasks.some(t => t.deadline && new Date(t.deadline) < new Date());
+  const isOverallOverdue = openTasks.some(t => isOverdue(t.deadline));
 
   return (
     <div className="py-8 max-w-4xl mx-auto">
@@ -121,7 +109,7 @@ export default function PublicationDetail() {
           </span>
           <span className="flex items-center gap-1.5 text-sm text-gray-500">
             <FileText className="h-3.5 w-3.5" />
-            {DOC_TYPE_LABELS[pub.doc_type] ?? pub.doc_type}
+            {DOC_TYPE_LABEL[pub.doc_type] ?? pub.doc_type}
           </span>
           {pubDate && (
             <span className="flex items-center gap-1.5 text-sm text-gray-500" title={format(pubDate, 'dd MMM yyyy')}>
@@ -205,16 +193,10 @@ export default function PublicationDetail() {
             <div className="space-y-2.5">
               {(['open', 'in_progress', 'done'] as const).map(status => {
                 const count = tasks.filter(t => t.status === status).length;
-                const labels = { open: 'Open', in_progress: 'In Progress', done: 'Done' };
-                const colors = {
-                  open: 'text-blue-700 bg-blue-50',
-                  in_progress: 'text-amber-700 bg-amber-50',
-                  done: 'text-green-700 bg-green-50',
-                };
                 return (
                   <div key={status} className="flex items-center justify-between">
-                    <span className="text-sm text-gray-600">{labels[status]}</span>
-                    <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${colors[status]}`}>
+                    <span className="text-sm text-gray-600">{TASK_STATUS_LABEL[status]}</span>
+                    <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${TASK_STATUS_PILL[status]}`}>
                       {count}
                     </span>
                   </div>
@@ -271,7 +253,8 @@ export default function PublicationDetail() {
           </h2>
           <div className="space-y-3">
             {tasks.map(task => {
-              const isOverdue = task.deadline && new Date(task.deadline) < new Date();
+              const overdue = isOverdue(task.deadline);
+              const taskStatus = task.status as TaskStatus;
               return (
                 <div
                   key={task.task_id}
@@ -281,21 +264,15 @@ export default function PublicationDetail() {
                     <div className="flex items-center gap-2 flex-wrap">
                       <SeverityBadge severity={task.severity || 'LOW'} />
                       <span className="text-xs bg-purple-100 text-purple-800 px-2 py-0.5 rounded-full font-semibold">
-                        {CHANGE_TYPE_LABELS[task.change_type] ?? task.change_type}
+                        {CHANGE_TYPE_LABEL[task.change_type] ?? task.change_type}
                       </span>
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                        task.status === 'open'
-                          ? 'bg-blue-50 text-blue-700'
-                          : task.status === 'in_progress'
-                          ? 'bg-amber-50 text-amber-700'
-                          : 'bg-green-50 text-green-700'
-                      }`}>
-                        {task.status === 'in_progress' ? 'In Progress' : task.status.charAt(0).toUpperCase() + task.status.slice(1)}
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${TASK_STATUS_PILL[taskStatus] ?? ''}`}>
+                        {TASK_STATUS_LABEL[taskStatus] ?? task.status}
                       </span>
                     </div>
                     {task.deadline && (
-                      <span className={`text-xs font-semibold shrink-0 ${isOverdue ? 'text-red-600' : 'text-gray-500'}`}>
-                        {isOverdue && '⚠ '}
+                      <span className={`text-xs font-semibold shrink-0 ${overdue ? 'text-red-600' : 'text-gray-500'}`}>
+                        {overdue && '⚠ '}
                         {format(new Date(task.deadline), 'dd MMM yyyy')}
                       </span>
                     )}

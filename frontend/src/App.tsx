@@ -9,7 +9,19 @@ import PolicyMap from './pages/PolicyMap';
 import RemediationTracker from './pages/RemediationTracker';
 import PublicationDetail from './pages/PublicationDetail';
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      // Treat data as fresh for 30s — avoids a flood of refetches when a user
+      // tabs away and comes back. Pages that need tighter polling still
+      // override via refetchInterval.
+      staleTime: 30_000,
+      gcTime: 5 * 60_000,
+      refetchOnWindowFocus: false,
+      retry: 1,
+    },
+  },
+});
 
 function App() {
   return (

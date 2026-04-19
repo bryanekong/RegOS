@@ -8,6 +8,8 @@ import { Task } from '../types';
 import SeverityBadge from '../components/SeverityBadge';
 import { useRealtimeTasks } from '../hooks/useRealtimeTasks';
 import { useToast } from '../components/Toast';
+import { CHANGE_TYPE_SHORT } from '../constants/taskStyles';
+import { isOverdue } from '../utils/dates';
 
 const COLUMNS = [
   {
@@ -38,12 +40,6 @@ const COLUMNS = [
     tabActiveClass: 'bg-green-700 text-white border-green-700',
   },
 ] as const;
-
-const CHANGE_TYPE_LABELS: Record<string, string> = {
-  NEW_REQUIREMENT: 'New Req.',
-  AMENDED_REQUIREMENT: 'Amended',
-  DEADLINE_CHANGE: 'Deadline',
-};
 
 export default function RemediationTracker() {
   const queryClient = useQueryClient();
@@ -308,8 +304,8 @@ function OwnerEditor({ task }: { task: Task }) {
 
 /* ── Mobile task card (no drag handle) ── */
 function MobileTaskCard({ task }: { task: Task }) {
-  const isOverdue = task.deadline ? new Date(task.deadline) < new Date() : false;
-  const changeLabel = CHANGE_TYPE_LABELS[task.change_type] ?? task.change_type;
+  const overdue = isOverdue(task.deadline);
+  const changeLabel = CHANGE_TYPE_SHORT[task.change_type] ?? task.change_type;
 
   return (
     <div className="bg-white rounded-lg border border-gray-100 shadow-sm p-3">
@@ -323,8 +319,8 @@ function MobileTaskCard({ task }: { task: Task }) {
       <div className="flex justify-between items-center mt-2.5 pt-2.5 border-t border-gray-50">
         <OwnerEditor task={task} />
         {task.deadline && (
-          <span className={`text-xs font-semibold ${isOverdue ? 'text-red-600' : 'text-gray-500'}`}>
-            {isOverdue && '⚠ '}
+          <span className={`text-xs font-semibold ${overdue ? 'text-red-600' : 'text-gray-500'}`}>
+            {overdue && '⚠ '}
             {format(new Date(task.deadline), 'dd MMM yyyy')}
           </span>
         )}
@@ -335,8 +331,8 @@ function MobileTaskCard({ task }: { task: Task }) {
 
 /* ── Desktop draggable task card ── */
 function TaskCard({ task, index }: { task: Task; index: number }) {
-  const isOverdue = task.deadline ? new Date(task.deadline) < new Date() : false;
-  const changeLabel = CHANGE_TYPE_LABELS[task.change_type] ?? task.change_type;
+  const overdue = isOverdue(task.deadline);
+  const changeLabel = CHANGE_TYPE_SHORT[task.change_type] ?? task.change_type;
 
   return (
     <Draggable draggableId={task.task_id} index={index}>
@@ -363,10 +359,10 @@ function TaskCard({ task, index }: { task: Task; index: number }) {
               <OwnerEditor task={task} />
               {task.deadline && (
                 <span
-                  className={`text-xs font-semibold ${isOverdue ? 'text-red-600' : 'text-gray-500'}`}
-                  title={isOverdue ? 'Overdue' : undefined}
+                  className={`text-xs font-semibold ${overdue ? 'text-red-600' : 'text-gray-500'}`}
+                  title={overdue ? 'Overdue' : undefined}
                 >
-                  {isOverdue && '⚠ '}
+                  {overdue && '⚠ '}
                   {format(new Date(task.deadline), 'dd MMM yyyy')}
                 </span>
               )}
