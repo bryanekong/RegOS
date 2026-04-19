@@ -66,9 +66,26 @@ async def lifespan(app: FastAPI):
                 ON pipeline_queue (stage, status);
         """))
     
+    # Reset jobs that were 'processing' during a previous crash/deploy so the
+    # pipeline resumes instead of silently wedging on every restart.
+    async with engine.begin() as conn:
+        result = await conn.execute(text("""
+            UPDATE pipeline_queue
+               SET status = 'pending'
+             WHERE status = 'processing'
+               AND created_at < now() - interval '5 minutes'
+         RETURNING id, stage
+        """))
+        stuck = result.all()
+        for row_id, stage in stuck:
+            await conn.execute(text("SELECT pg_notify(:ch, :p)"),
+                               {"ch": stage, "p": str(row_id)})
+        if stuck:
+            logger.warning(f"Startup sweep re-queued {len(stuck)} stuck jobs")
+
     # seed policies synchronously
     seed_policies()
-    
+
     yield
     await engine.dispose()
 
