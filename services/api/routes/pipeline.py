@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, insert, text, update
+from sqlalchemy import select, func, insert, text, update, delete
 from sqlalchemy.exc import IntegrityError
 from db import get_db
 from models import PipelineQueue, Publication
@@ -150,14 +150,13 @@ async def clear_pipeline(
     dead-lettered jobs."""
     wanted = [s.strip() for s in statuses.split(',') if s.strip()]
     if not wanted:
-        return {"cleared": 0}
-    result = await db.execute(
-        text("DELETE FROM pipeline_queue WHERE status = ANY(:s) RETURNING id"),
-        {"s": wanted},
-    )
-    ids = [r[0] for r in result.all()]
+        return {"cleared": 0, "statuses": []}
+    # Use ORM delete with in_() — mixing a Python list into a raw text()
+    # :bindparam as a PG array does not work reliably across drivers.
+    stmt = delete(PipelineQueue).where(PipelineQueue.status.in_(wanted))
+    result = await db.execute(stmt)
     await db.commit()
-    return {"cleared": len(ids), "statuses": wanted}
+    return {"cleared": result.rowcount or 0, "statuses": wanted}
 
 
 @router.get("/pipeline/failed")
