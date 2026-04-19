@@ -91,10 +91,10 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="RegOS API", version="1.0.0", lifespan=lifespan)
 
-# Comma-separated list of allowed origins, e.g.
-#   ALLOWED_ORIGINS="https://regos.vercel.app,http://localhost:5173"
-# A literal "*" is accepted for dev but logged as a warning at startup.
-_default_origins = "http://localhost:3000,http://localhost:5173"
+# Explicit allowed origins (via ALLOWED_ORIGINS env var, comma-separated) plus
+# a regex to match any *.vercel.app preview/prod URL so ephemeral Vercel
+# deployments work without re-deploying the backend for each one.
+_default_origins = "http://localhost:3000,http://localhost:5173,https://reg-os.vercel.app"
 origins = [o.strip() for o in os.getenv('ALLOWED_ORIGINS', _default_origins).split(',') if o.strip()]
 
 if "*" in origins:
@@ -103,6 +103,7 @@ if "*" in origins:
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
+    allow_origin_regex=r"^https://[a-z0-9-]+\.vercel\.app$",
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
