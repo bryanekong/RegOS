@@ -1,26 +1,13 @@
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { format, formatDistanceToNow } from 'date-fns';
 import { ChevronDown, ChevronUp, ExternalLink } from 'lucide-react';
 import { Publication } from '../types';
 import SeverityBadge from './SeverityBadge';
 import UrgencyBadge from './UrgencyBadge';
+import { DOC_TYPE_LABEL, PUBLICATION_STATUS_PILL } from '../constants/taskStyles';
 
-const STATUS_STYLES: Record<string, string> = {
-  pending: 'bg-gray-100 text-gray-500',
-  ingested: 'bg-blue-50 text-blue-600',
-  classified: 'bg-indigo-50 text-indigo-600',
-  actioned: 'bg-green-50 text-green-700',
-};
-
-const DOC_TYPE_LABELS: Record<string, string> = {
-  FinalRule: 'Final Rule',
-  ConsultationPaper: 'Consultation Paper',
-  DearCEOLetter: 'Dear CEO Letter',
-  GuidanceNote: 'Guidance Note',
-};
-
-export default function PublicationCard({ pub }: { pub: Publication }) {
+function PublicationCardImpl({ pub }: { pub: Publication }) {
   const [expanded, setExpanded] = useState(false);
 
   const pubDate = pub.pub_date ? new Date(pub.pub_date) : null;
@@ -28,7 +15,7 @@ export default function PublicationCard({ pub }: { pub: Publication }) {
   const dateRelative = pubDate ? formatDistanceToNow(pubDate, { addSuffix: true }) : '';
 
   const { severity, urgency, framework, affected_provisions } = pub.classification || {};
-  const statusStyle = STATUS_STYLES[pub.status] ?? STATUS_STYLES['pending'];
+  const statusStyle = PUBLICATION_STATUS_PILL[pub.status] ?? PUBLICATION_STATUS_PILL['pending'];
 
   return (
     <div
@@ -54,7 +41,7 @@ export default function PublicationCard({ pub }: { pub: Publication }) {
         <div className="mt-2.5 flex items-center flex-wrap gap-2 text-xs">
           <span className="bg-blue-100 text-blue-800 px-2 py-0.5 rounded font-semibold">FCA</span>
           <span className="text-gray-600 font-medium">
-            {DOC_TYPE_LABELS[pub.doc_type] ?? pub.doc_type}
+            {DOC_TYPE_LABEL[pub.doc_type] ?? pub.doc_type}
           </span>
           <span className="text-gray-300">•</span>
           <span className="text-gray-500" title={dateFormatted}>
@@ -118,3 +105,8 @@ export default function PublicationCard({ pub }: { pub: Publication }) {
     </div>
   );
 }
+
+// Memoized so the feed's Load More / filter changes don't re-render every
+// existing card — the expanded state is local to each instance anyway.
+const PublicationCard = memo(PublicationCardImpl);
+export default PublicationCard;

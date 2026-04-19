@@ -2,7 +2,7 @@ import { useState, useMemo, useRef, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { DragDropContext, Droppable, Draggable, DropResult } from 'react-beautiful-dnd';
 import { format } from 'date-fns';
-import { Pencil, Check, X, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Pencil, Check, X, ChevronLeft, ChevronRight, Search } from 'lucide-react';
 import { fetchTasks, updateTask } from '../api/client';
 import { Task } from '../types';
 import SeverityBadge from '../components/SeverityBadge';
@@ -46,6 +46,8 @@ export default function RemediationTracker() {
   const { toast } = useToast();
   const [severityFilter, setSeverityFilter] = useState<string>('All');
   const [activeTab, setActiveTab] = useState<0 | 1 | 2>(0);
+  const [search, setSearch] = useState('');
+  const searchRef = useRef<HTMLInputElement>(null);
 
   const { data: tasks = [] } = useQuery({
     queryKey: ['tasks'],
@@ -64,9 +66,48 @@ export default function RemediationTracker() {
   });
 
   const filteredTasks = useMemo(() => {
-    if (severityFilter === 'All') return tasks;
-    return tasks.filter(t => t.severity === severityFilter);
-  }, [tasks, severityFilter]);
+    let results = tasks;
+    if (severityFilter !== 'All') {
+      results = results.filter(t => t.severity === severityFilter);
+    }
+    const q = search.trim().toLowerCase();
+    if (q) {
+      // Search across free-text fields an operator would look for by memory:
+      // the action, the owner, the section title.
+      results = results.filter(t =>
+        (t.action_text ?? '').toLowerCase().includes(q) ||
+        (t.owner ?? '').toLowerCase().includes(q) ||
+        (t.section_title ?? '').toLowerCase().includes(q)
+      );
+    }
+    return results;
+  }, [tasks, severityFilter, search]);
+
+  // Keyboard shortcuts: "/" focuses search, Esc clears filters/search.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      const inField = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+      if (e.key === '/' && !inField) {
+        e.preventDefault();
+        searchRef.current?.focus();
+        return;
+      }
+      if (e.key === 'Escape') {
+        if (inField && e.target === searchRef.current) {
+          setSearch('');
+          (e.target as HTMLInputElement).blur();
+          return;
+        }
+        if (!inField && (severityFilter !== 'All' || search)) {
+          setSeverityFilter('All');
+          setSearch('');
+        }
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [severityFilter, search]);
 
   const columns = useMemo(
     () => ({
@@ -112,7 +153,32 @@ export default function RemediationTracker() {
               : 'Manage policy updates prompted by regulatory change.'}
           </p>
         </div>
-        <div className="flex gap-1.5 flex-wrap">
+        <div className="flex gap-2 flex-wrap items-center">
+          <div className="relative">
+            <Search className="h-3.5 w-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              ref={searchRef}
+              type="text"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Search tasks…"
+              className="text-xs border border-gray-300 rounded-lg pl-7 pr-7 py-1.5 w-48 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-700"
+              aria-label="Search tasks"
+            />
+            {search ? (
+              <button
+                onClick={() => setSearch('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700"
+                aria-label="Clear search"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            ) : (
+              <kbd className="absolute right-2 top-1/2 -translate-y-1/2 px-1.5 py-0.5 text-[10px] font-semibold text-gray-400 bg-gray-100 border border-gray-200 rounded pointer-events-none">
+                /
+              </kbd>
+            )}
+          </div>
           {['All', 'CRITICAL', 'HIGH', 'MEDIUM', 'LOW'].map(sev => (
             <button
               key={sev}

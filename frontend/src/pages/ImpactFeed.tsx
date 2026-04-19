@@ -1,5 +1,6 @@
-import { useState, useMemo } from 'react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router-dom';
 import { Loader2, Zap, X } from 'lucide-react';
 import { isAfter, isBefore, parseISO, startOfDay, endOfDay } from 'date-fns';
 import { fetchPublications, triggerIngest } from '../api/client';
@@ -16,13 +17,22 @@ const SEVERITY_PILL_COLORS: Record<string, string> = {
 
 const PAGE_SIZE = 10;
 
+// URL param helpers so filter state survives reloads, deep links, and back/forward.
+const normalizeSeverity = (v: string | null): string => {
+  if (!v) return 'All';
+  const upper = v.toUpperCase();
+  return (SEVERITY_OPTIONS as readonly string[]).includes(upper) ? upper : 'All';
+};
+
 export default function ImpactFeed() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const [searchParams, setSearchParams] = useSearchParams();
 
-  const [severityFilter, setSeverityFilter] = useState<string>('All');
-  const [dateFrom, setDateFrom] = useState<string>('');
-  const [dateTo, setDateTo] = useState<string>('');
+  const severityFilter = normalizeSeverity(searchParams.get('severity'));
+  const dateFrom = searchParams.get('from') ?? '';
+  const dateTo = searchParams.get('to') ?? '';
+
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [isTriggering, setIsTriggering] = useState(false);
 
@@ -31,6 +41,22 @@ export default function ImpactFeed() {
     queryFn: () => fetchPublications({ limit: 200 }),
     refetchInterval: 30000,
   });
+
+  const updateParam = useCallback(
+    (key: string, value: string) => {
+      setSearchParams(
+        prev => {
+          const next = new URLSearchParams(prev);
+          if (value && value !== 'All') next.set(key, value);
+          else next.delete(key);
+          return next;
+        },
+        { replace: true }
+      );
+      setVisibleCount(PAGE_SIZE);
+    },
+    [setSearchParams]
+  );
 
   const filteredPublications = useMemo(() => {
     let results = allPublications;
@@ -60,33 +86,35 @@ export default function ImpactFeed() {
 
   const visiblePublications = filteredPublications.slice(0, visibleCount);
   const hasMore = visibleCount < filteredPublications.length;
+  const hasActiveFilter = severityFilter !== 'All' || !!dateFrom || !!dateTo;
 
-  const hasActiveFilter = severityFilter !== 'All' || dateFrom || dateTo;
-
-  const clearFilters = () => {
-    setSeverityFilter('All');
-    setDateFrom('');
-    setDateTo('');
+  const clearFilters = useCallback(() => {
+    setSearchParams(new URLSearchParams(), { replace: true });
     setVisibleCount(PAGE_SIZE);
-  };
+  }, [setSearchParams]);
 
-  const handleSeverityChange = (sev: string) => {
-    setSeverityFilter(sev);
-    setVisibleCount(PAGE_SIZE);
-  };
-
-  const handleDateChange = (field: 'from' | 'to', val: string) => {
-    if (field === 'from') setDateFrom(val);
-    else setDateTo(val);
-    setVisibleCount(PAGE_SIZE);
-  };
+  // Esc clears filters when any are active — avoids a trip to the mouse when
+  // you're scanning the feed.
+  useEffect(() => {
+    if (!hasActiveFilter) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      clearFilters();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [hasActiveFilter, clearFilters]);
 
   const handleTrigger = async () => {
     setIsTriggering(true);
     try {
       await triggerIngest();
       toast('Pipeline triggered — check the Remediation Tracker shortly', 'success');
-      setTimeout(() => queryClient.invalidateQueries({ queryKey: ['publications'] }), 1500);
+      // Invalidate immediately; react-query will dedupe against the polling
+      // cycle and show fresh rows as stages complete.
+      queryClient.invalidateQueries({ queryKey: ['publications'] });
     } catch {
       toast('Failed to trigger demo ingest — check API connection', 'error');
     } finally {
@@ -128,7 +156,7 @@ export default function ImpactFeed() {
               return (
                 <button
                   key={sev}
-                  onClick={() => handleSeverityChange(sev)}
+                  onClick={() => updateParam('severity', sev)}
                   className={`px-3 py-1 text-xs font-semibold rounded-full border transition-all ${
                     isActive
                       ? sev === 'All'
@@ -153,7 +181,7 @@ export default function ImpactFeed() {
             <input
               type="date"
               value={dateFrom}
-              onChange={e => handleDateChange('from', e.target.value)}
+              onChange={e => updateParam('from', e.target.value)}
               className="text-xs border border-gray-300 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-700"
               placeholder="From"
             />
@@ -162,7 +190,7 @@ export default function ImpactFeed() {
               type="date"
               value={dateTo}
               min={dateFrom || undefined}
-              onChange={e => handleDateChange('to', e.target.value)}
+              onChange={e => updateParam('to', e.target.value)}
               className="text-xs border border-gray-300 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-700"
               placeholder="To"
             />
@@ -170,10 +198,14 @@ export default function ImpactFeed() {
           {hasActiveFilter && (
             <button
               onClick={clearFilters}
+              title="Clear filters (Esc)"
               className="ml-auto flex items-center gap-1 text-xs text-gray-400 hover:text-gray-700 transition-colors"
             >
               <X className="h-3.5 w-3.5" />
               Clear filters
+              <kbd className="ml-1 px-1.5 py-0.5 text-[10px] font-semibold text-gray-400 bg-gray-100 border border-gray-200 rounded">
+                Esc
+              </kbd>
             </button>
           )}
         </div>
