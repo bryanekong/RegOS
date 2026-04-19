@@ -104,8 +104,12 @@ class Stage1Worker(BaseWorker):
       sections = [{'id': 's1', 'title': 'Full Text', 'text': full_text[:5000]}]
 
     # 3. Persist and forward
+    # Store full_text once on the publications row; downstream stages load it
+    # from there rather than carrying a second copy through the queue payload.
     self.update_publication(publication_id, full_text=full_text[:10000], sections=sections, status='ingested')
-    self.publish_next({**payload, 'publication_id': publication_id, 'full_text': full_text[:8000]})
+    forward = {k: v for k, v in payload.items() if k != 'full_text'}
+    forward['publication_id'] = publication_id
+    self.publish_next(forward)
     self.logger.info(f"Stage1 complete: pub={publication_id}, sections={len(sections)}")
 
 if __name__ == '__main__': Stage1Worker().run()

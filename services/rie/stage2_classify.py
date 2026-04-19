@@ -11,7 +11,10 @@ class Stage2Worker(BaseWorker):
   def process(self, payload):
     publication_id = payload['publication_id']
     pub = self.get_publication(publication_id)
-    text = (pub['title'] + ' ' + (payload.get('full_text') or pub['full_text'])).lower()
+    # full_text comes from the publications row — payload no longer carries it
+    # (see stage1). Fall back to payload only for older queued rows.
+    full_text_raw = pub.get('full_text') or payload.get('full_text', '')
+    text = (pub['title'] + ' ' + full_text_raw).lower()
 
     # Framework matching
     matches = [kw for kw in self.taxonomy['keywords'] if kw.lower() in text]
@@ -43,7 +46,7 @@ class Stage2Worker(BaseWorker):
     )
     now = datetime.now(timezone.utc)
     min_days = None
-    for m in date_pat.finditer(payload.get('full_text', '')):
+    for m in date_pat.finditer(full_text_raw):
       try:
         dt = dateparser.parse(m.group(0)).replace(tzinfo=timezone.utc)
         days = (dt - now).days
@@ -56,8 +59,7 @@ class Stage2Worker(BaseWorker):
       elif min_days < 30: urgency = 'URGENT'
       elif min_days < 90: urgency = 'STANDARD'
 
-    # Provisions
-    full_text_raw = payload.get('full_text', '')
+    # Provisions (full_text_raw already loaded above)
     affected_provisions = [p for p in self.taxonomy['provisions'] if p in full_text_raw]
     confidence = 'HIGH' if len(matches) >= 4 else 'MEDIUM' if len(matches) >= 2 else 'LOW'
 
