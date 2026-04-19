@@ -14,77 +14,97 @@ from routes import publications, policies, tasks, pipeline
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+async def _safe_exec(engine_, sql: str, label: str):
+    """Run a DDL/DML statement in its own transaction so one failure can't
+    abort the whole startup sequence and leave the app unable to serve
+    requests (including CORS preflight)."""
+    try:
+        async with engine_.begin() as conn:
+            await conn.execute(text(sql))
+    except Exception as e:
+        logger.error(f"Startup step '{label}' failed (continuing): {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # run async create_all
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-        
-        # executed raw SQL
-        await conn.execute(text("""
-            CREATE OR REPLACE FUNCTION notify_pipeline_stage() RETURNS trigger AS $$
-            BEGIN PERFORM pg_notify(NEW.stage, NEW.id::text); RETURN NEW; END;
-            $$ LANGUAGE plpgsql;
-        """))
-        await conn.execute(text("DROP TRIGGER IF EXISTS pipeline_queue_notify ON pipeline_queue;"))
-        await conn.execute(text("""
-            CREATE TRIGGER pipeline_queue_notify AFTER INSERT ON pipeline_queue
-            FOR EACH ROW EXECUTE FUNCTION notify_pipeline_stage();
-        """))
+    # Each step runs in its own transaction — if any single DDL fails
+    # (e.g. the UNIQUE constraint can't be added because duplicates exist),
+    # the rest of startup still completes and the app can serve traffic.
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+    except Exception as e:
+        logger.error(f"create_all failed (continuing): {e}")
 
-        # Idempotent schema patches for existing deployments (create_all only
-        # creates new tables; it won't add constraints/columns to existing ones).
-        await conn.execute(text("""
-            ALTER TABLE pipeline_queue
-                ADD COLUMN IF NOT EXISTS attempts BIGINT DEFAULT 0,
-                ADD COLUMN IF NOT EXISTS last_error TEXT;
-        """))
-        await conn.execute(text("""
-            DO $$ BEGIN
-                IF NOT EXISTS (
-                    SELECT 1 FROM pg_constraint
-                    WHERE conname = 'uq_remediation_task_pub_policy_section'
-                ) THEN
-                    ALTER TABLE remediation_tasks
-                    ADD CONSTRAINT uq_remediation_task_pub_policy_section
-                    UNIQUE (publication_id, policy_id, policy_section_id);
-                END IF;
-            END $$;
-        """))
-        await conn.execute(text("""
-            CREATE INDEX IF NOT EXISTS ix_remediation_task_publication_id
-                ON remediation_tasks (publication_id);
-            CREATE INDEX IF NOT EXISTS ix_remediation_task_policy_id
-                ON remediation_tasks (policy_id);
-            CREATE INDEX IF NOT EXISTS ix_remediation_task_status
-                ON remediation_tasks (status);
-            CREATE INDEX IF NOT EXISTS ix_remediation_task_deadline
-                ON remediation_tasks (deadline);
-            CREATE INDEX IF NOT EXISTS ix_pipeline_queue_status
-                ON pipeline_queue (status);
-            CREATE INDEX IF NOT EXISTS ix_pipeline_queue_stage_status
-                ON pipeline_queue (stage, status);
-        """))
-    
+    await _safe_exec(engine, """
+        CREATE OR REPLACE FUNCTION notify_pipeline_stage() RETURNS trigger AS $$
+        BEGIN PERFORM pg_notify(NEW.stage, NEW.id::text); RETURN NEW; END;
+        $$ LANGUAGE plpgsql;
+    """, "notify_pipeline_stage function")
+
+    await _safe_exec(engine,
+        "DROP TRIGGER IF EXISTS pipeline_queue_notify ON pipeline_queue;",
+        "drop old trigger")
+    await _safe_exec(engine, """
+        CREATE TRIGGER pipeline_queue_notify AFTER INSERT ON pipeline_queue
+        FOR EACH ROW EXECUTE FUNCTION notify_pipeline_stage();
+    """, "create trigger")
+
+    await _safe_exec(engine, """
+        ALTER TABLE pipeline_queue
+            ADD COLUMN IF NOT EXISTS attempts BIGINT DEFAULT 0,
+            ADD COLUMN IF NOT EXISTS last_error TEXT;
+    """, "pipeline_queue attempts/last_error columns")
+
+    # UNIQUE constraint may fail if duplicate tasks already exist — log and
+    # move on rather than crashing the app.
+    await _safe_exec(engine, """
+        DO $$ BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_constraint
+                WHERE conname = 'uq_remediation_task_pub_policy_section'
+            ) THEN
+                ALTER TABLE remediation_tasks
+                ADD CONSTRAINT uq_remediation_task_pub_policy_section
+                UNIQUE (publication_id, policy_id, policy_section_id);
+            END IF;
+        END $$;
+    """, "remediation_tasks unique constraint")
+
+    for idx_sql, label in [
+        ("CREATE INDEX IF NOT EXISTS ix_remediation_task_publication_id ON remediation_tasks (publication_id);", "ix_rem_pub"),
+        ("CREATE INDEX IF NOT EXISTS ix_remediation_task_policy_id ON remediation_tasks (policy_id);", "ix_rem_policy"),
+        ("CREATE INDEX IF NOT EXISTS ix_remediation_task_status ON remediation_tasks (status);", "ix_rem_status"),
+        ("CREATE INDEX IF NOT EXISTS ix_remediation_task_deadline ON remediation_tasks (deadline);", "ix_rem_deadline"),
+        ("CREATE INDEX IF NOT EXISTS ix_pipeline_queue_status ON pipeline_queue (status);", "ix_queue_status"),
+        ("CREATE INDEX IF NOT EXISTS ix_pipeline_queue_stage_status ON pipeline_queue (stage, status);", "ix_queue_stage_status"),
+    ]:
+        await _safe_exec(engine, idx_sql, label)
+
     # Reset jobs that were 'processing' during a previous crash/deploy so the
     # pipeline resumes instead of silently wedging on every restart.
-    async with engine.begin() as conn:
-        result = await conn.execute(text("""
-            UPDATE pipeline_queue
-               SET status = 'pending'
-             WHERE status = 'processing'
-               AND created_at < now() - interval '5 minutes'
-         RETURNING id, stage
-        """))
-        stuck = result.all()
-        for row_id, stage in stuck:
-            await conn.execute(text("SELECT pg_notify(:ch, :p)"),
-                               {"ch": stage, "p": str(row_id)})
-        if stuck:
-            logger.warning(f"Startup sweep re-queued {len(stuck)} stuck jobs")
+    try:
+        async with engine.begin() as conn:
+            result = await conn.execute(text("""
+                UPDATE pipeline_queue
+                   SET status = 'pending'
+                 WHERE status = 'processing'
+                   AND created_at < now() - interval '5 minutes'
+             RETURNING id, stage
+            """))
+            stuck = result.all()
+            for row_id, stage in stuck:
+                await conn.execute(text("SELECT pg_notify(:ch, :p)"),
+                                   {"ch": stage, "p": str(row_id)})
+            if stuck:
+                logger.warning(f"Startup sweep re-queued {len(stuck)} stuck jobs")
+    except Exception as e:
+        logger.error(f"Startup stuck-job sweep failed (continuing): {e}")
 
-    # seed policies synchronously
-    seed_policies()
+    try:
+        seed_policies()
+    except Exception as e:
+        logger.error(f"seed_policies failed (continuing): {e}")
 
     yield
     await engine.dispose()
