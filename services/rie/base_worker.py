@@ -54,15 +54,39 @@ class BaseWorker:
         self.logger.info(f"Processing queue_id={queue_id}, payload keys: {list(payload.keys())}")
         self.process(payload)
         self.cur.execute(
-          "UPDATE pipeline_queue SET status='done', processed_at=now() WHERE id=%s",
+          "UPDATE pipeline_queue SET status='done', processed_at=now(), last_error=NULL WHERE id=%s",
           (queue_id,)
         )
       except Exception as e:
+        # Retry up to MAX_ATTEMPTS-1 times before dead-lettering to 'failed'.
+        # On retry, status goes back to 'pending' so another NOTIFY or the
+        # stuck-job sweeper will pick it up.
+        MAX_ATTEMPTS = 3
+        err_msg = f"{type(e).__name__}: {e}"[:1000]
         self.logger.error(f"Stage failed for queue_id={queue_id}: {e}", exc_info=True)
         self.cur.execute(
-          "UPDATE pipeline_queue SET status='failed', processed_at=now() WHERE id=%s",
-          (queue_id,)
+          """UPDATE pipeline_queue
+             SET attempts = COALESCE(attempts, 0) + 1,
+                 last_error = %s,
+                 status = CASE
+                   WHEN COALESCE(attempts, 0) + 1 >= %s THEN 'failed'
+                   ELSE 'pending'
+                 END,
+                 processed_at = CASE
+                   WHEN COALESCE(attempts, 0) + 1 >= %s THEN now()
+                   ELSE processed_at
+                 END
+             WHERE id = %s
+             RETURNING status, attempts""",
+          (err_msg, MAX_ATTEMPTS, MAX_ATTEMPTS, queue_id)
         )
+        new_status, attempts = self.cur.fetchone()
+        if new_status == 'pending':
+          # Re-emit the notification so a worker picks it up again.
+          self.cur.execute("SELECT pg_notify(%s, %s)", (self.stage_listen, str(queue_id)))
+          self.logger.info(f"Retrying queue_id={queue_id} (attempt {attempts}/{MAX_ATTEMPTS})")
+        else:
+          self.logger.error(f"Dead-lettered queue_id={queue_id} after {attempts} attempts")
 
   def publish_next(self, payload: dict):
     if not self.stage_next:

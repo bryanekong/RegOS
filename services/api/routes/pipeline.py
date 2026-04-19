@@ -1,13 +1,17 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, insert
+from sqlalchemy import select, func, insert, text, update
 from sqlalchemy.exc import IntegrityError
 from db import get_db
 from models import PipelineQueue, Publication
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import hashlib
 
 router = APIRouter()
+
+# Jobs still 'processing' after this long are assumed orphaned (worker crashed
+# between claim and completion) and are reset to 'pending' so they can be retried.
+STUCK_JOB_THRESHOLD = timedelta(minutes=5)
 
 @router.get("/pipeline/status")
 async def get_pipeline_status(db: AsyncSession = Depends(get_db)):
@@ -90,3 +94,72 @@ async def trigger_demo_ingest(db: AsyncSession = Depends(get_db)):
         await db.commit()
 
     return {"triggered": True, "publication_id": str(pub_id)}
+
+
+@router.post("/pipeline/sweep")
+async def sweep_stuck_jobs(db: AsyncSession = Depends(get_db)):
+    """Reset jobs stuck in 'processing' past the threshold and re-notify.
+    Safe to call repeatedly — only rows older than STUCK_JOB_THRESHOLD are touched."""
+    cutoff = datetime.now(timezone.utc) - STUCK_JOB_THRESHOLD
+    result = await db.execute(
+        text("""
+            UPDATE pipeline_queue
+               SET status = 'pending'
+             WHERE status = 'processing'
+               AND created_at < :cutoff
+         RETURNING id, stage
+        """),
+        {"cutoff": cutoff},
+    )
+    rows = result.all()
+    for row_id, stage in rows:
+        await db.execute(text("SELECT pg_notify(:ch, :payload)"),
+                         {"ch": stage, "payload": str(row_id)})
+    await db.commit()
+    return {"swept": len(rows), "ids": [r[0] for r in rows]}
+
+
+@router.post("/pipeline/retry/{queue_id}")
+async def retry_failed_job(queue_id: int, db: AsyncSession = Depends(get_db)):
+    """Manually retry a dead-lettered job. Resets attempts to 0 and re-notifies."""
+    result = await db.execute(
+        text("""
+            UPDATE pipeline_queue
+               SET status = 'pending', attempts = 0, last_error = NULL
+             WHERE id = :id AND status = 'failed'
+         RETURNING stage
+        """),
+        {"id": queue_id},
+    )
+    row = result.first()
+    if not row:
+        return {"retried": False, "reason": "not found or not in failed state"}
+    await db.execute(text("SELECT pg_notify(:ch, :payload)"),
+                     {"ch": row[0], "payload": str(queue_id)})
+    await db.commit()
+    return {"retried": True, "queue_id": queue_id, "stage": row[0]}
+
+
+@router.get("/pipeline/failed")
+async def list_failed_jobs(db: AsyncSession = Depends(get_db), limit: int = 50):
+    """List dead-lettered jobs for the ops UI to show/retry."""
+    q = (
+        select(
+            PipelineQueue.id, PipelineQueue.stage, PipelineQueue.payload,
+            PipelineQueue.attempts, PipelineQueue.last_error,
+            PipelineQueue.created_at, PipelineQueue.processed_at,
+        )
+        .where(PipelineQueue.status == 'failed')
+        .order_by(PipelineQueue.processed_at.desc().nullslast())
+        .limit(limit)
+    )
+    rows = (await db.execute(q)).all()
+    return [
+        {
+            "id": r.id, "stage": r.stage, "payload": r.payload,
+            "attempts": r.attempts, "last_error": r.last_error,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "processed_at": r.processed_at.isoformat() if r.processed_at else None,
+        }
+        for r in rows
+    ]
