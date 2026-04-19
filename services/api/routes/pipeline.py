@@ -140,6 +140,26 @@ async def retry_failed_job(queue_id: int, db: AsyncSession = Depends(get_db)):
     return {"retried": True, "queue_id": queue_id, "stage": row[0]}
 
 
+@router.post("/pipeline/clear")
+async def clear_pipeline(
+    statuses: str = "pending,processing,failed",
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete queue rows in the given statuses. Defaults to all non-done rows
+    so the dashboard goes back to idle. Pass ?statuses=failed to only clear
+    dead-lettered jobs."""
+    wanted = [s.strip() for s in statuses.split(',') if s.strip()]
+    if not wanted:
+        return {"cleared": 0}
+    result = await db.execute(
+        text("DELETE FROM pipeline_queue WHERE status = ANY(:s) RETURNING id"),
+        {"s": wanted},
+    )
+    ids = [r[0] for r in result.all()]
+    await db.commit()
+    return {"cleared": len(ids), "statuses": wanted}
+
+
 @router.get("/pipeline/failed")
 async def list_failed_jobs(db: AsyncSession = Depends(get_db), limit: int = 50):
     """List dead-lettered jobs for the ops UI to show/retry."""
