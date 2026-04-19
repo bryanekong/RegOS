@@ -1,6 +1,6 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { format, isAfter, subHours, formatDistanceToNow } from 'date-fns';
 import {
   AlertTriangle,
@@ -12,9 +12,17 @@ import {
   CheckCircle,
   Loader,
   Info,
+  Trash2,
 } from 'lucide-react';
-import { fetchTasks, fetchPublications, fetchPolicies, fetchPipelineStatus } from '../api/client';
+import {
+  fetchTasks,
+  fetchPublications,
+  fetchPolicies,
+  fetchPipelineStatus,
+  clearPipeline,
+} from '../api/client';
 import SeverityBadge from '../components/SeverityBadge';
+import { useToast } from '../components/Toast';
 
 const STAGE_LABELS: Record<string, string> = {
   stage1: 'Ingest',
@@ -75,6 +83,28 @@ function SeverityRow({ label, count, color }: { label: string; count: number; co
 }
 
 export default function Dashboard() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const [clearing, setClearing] = useState(false);
+
+  const handleClearPipeline = async () => {
+    if (clearing) return;
+    const confirmed = window.confirm(
+      'Clear all pending, active, and failed pipeline rows? Completed (done) rows are kept.'
+    );
+    if (!confirmed) return;
+    setClearing(true);
+    try {
+      const res = await clearPipeline();
+      toast(`Cleared ${res.cleared} pipeline row${res.cleared === 1 ? '' : 's'}`, 'success');
+      queryClient.invalidateQueries({ queryKey: ['pipeline-status'] });
+    } catch {
+      toast('Failed to clear pipeline', 'error');
+    } finally {
+      setClearing(false);
+    }
+  };
+
   const { data: tasks = [], isLoading: tasksLoading } = useQuery({
     queryKey: ['tasks'],
     queryFn: () => fetchTasks(),
@@ -255,10 +285,21 @@ export default function Dashboard() {
         {/* Pipeline stages */}
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="font-semibold text-gray-800">Pipeline Stages</h2>
-            {totalPending !== null && totalPending > 0 && (
-              <span className="h-2 w-2 rounded-full bg-amber-400 animate-pulse" />
-            )}
+            <div className="flex items-center gap-2">
+              <h2 className="font-semibold text-gray-800">Pipeline Stages</h2>
+              {totalPending !== null && totalPending > 0 && (
+                <span className="h-2 w-2 rounded-full bg-amber-400 animate-pulse" />
+              )}
+            </div>
+            <button
+              onClick={handleClearPipeline}
+              disabled={clearing || totalPending === 0}
+              title="Clear pending, active, and failed pipeline rows"
+              className="inline-flex items-center gap-1 text-xs font-medium text-gray-500 hover:text-red-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              {clearing ? 'Clearing…' : 'Clear'}
+            </button>
           </div>
           {!pipelineStatus ? (
             <div className="space-y-3">

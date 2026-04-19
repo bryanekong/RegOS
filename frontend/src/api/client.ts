@@ -54,3 +54,10 @@ export const triggerIngest = async (): Promise<{ triggered: boolean; publication
   const { data } = await api.post('/api/ingest/trigger');
   return data;
 };
+
+export const clearPipeline = async (
+  statuses: string = 'pending,processing,failed'
+): Promise<{ cleared: number; statuses: string[] }> => {
+  const { data } = await api.post('/api/pipeline/clear', null, { params: { statuses } });
+  return data;
+};
