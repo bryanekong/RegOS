@@ -295,10 +295,10 @@ export default function Dashboard() {
               onClick={handleClearPipeline}
               disabled={clearing || totalPending === 0}
               title="Clear pending, active, and failed pipeline rows"
-              className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-md border border-red-200 bg-red-50 text-red-700 hover:bg-red-100 hover:border-red-300 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-red-50 transition-colors"
+              className="inline-flex items-center gap-1 text-xs font-medium text-gray-500 hover:text-red-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
               <Trash2 className="h-3.5 w-3.5" />
-              {clearing ? 'Clearing…' : 'Clear queue'}
+              {clearing ? 'Clearing…' : 'Clear'}
             </button>
           </div>
           {!pipelineStatus ? (
